@@ -329,13 +329,13 @@ window.YouTubeAPI = {
             }
         }
 
-        // 5. iTunes API + Fallback
+        // 5. Open YouTube AutoComplete Suggest API + Piped Resolver
         if (candidates.length === 0) {
             try {
-                const itunesCandidates = await this.searchItunesFallback(query, maxResults);
-                if (itunesCandidates && itunesCandidates.length > 0) candidates = itunesCandidates;
+                const suggestCandidates = await this.searchOpenYoutubeSuggestFallback(query, maxResults);
+                if (suggestCandidates && suggestCandidates.length > 0) candidates = suggestCandidates;
             } catch (e) {
-                console.warn('iTunes API fallback error:', e);
+                console.warn('Open YouTube suggest fallback error:', e);
             }
         }
 
@@ -524,36 +524,23 @@ window.YouTubeAPI = {
         return [];
     },
 
-    async searchItunesFallback(query, maxResults = 5) {
+    async searchOpenYoutubeSuggestFallback(query, maxResults = 5) {
         try {
-            const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=3`;
-            const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
+            const suggestUrl = `https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&q=${encodeURIComponent(query)}`;
+            const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(suggestUrl)}`, { signal: AbortSignal.timeout(3500) });
             if (res.ok) {
                 const data = await res.json();
-                if (data.results && data.results.length > 0) {
-                    const firstTrack = data.results[0];
-                    const cleanTerm = `${firstTrack.trackName} ${firstTrack.artistName}`;
-                    const pipedRes = await this.searchPipedPublicApi(cleanTerm, maxResults).catch(() => []);
-                    if (pipedRes && pipedRes.length > 0) return pipedRes;
-
-                    return data.results.map(r => ({
-                        videoId: 'fJ9rUzIMcZQ',
-                        title: `${r.trackName} - ${r.artistName}`,
-                        channelTitle: r.artistName,
-                        thumbnail: r.artworkUrl100 || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100&auto=format&fit=crop&q=60',
-                        url: `https://www.youtube.com/watch?v=fJ9rUzIMcZQ`,
-                        verification: {
-                            score: 85,
-                            status: 'high',
-                            badgeClass: 'badge-high',
-                            badgeText: '🟡 85% Verified (iTunes)',
-                            reason: `Track verified via Apple Music: ${r.trackName} by ${r.artistName}`
-                        }
-                    }));
+                if (data && data.contents) {
+                    const match = data.contents.match(/\["([^"]+)"/g);
+                    if (match && match.length > 0) {
+                        const topSuggest = match[0].replace(/\["/, '').replace(/"/, '');
+                        const pipedRes = await this.searchPipedPublicApi(topSuggest, maxResults).catch(() => []);
+                        if (pipedRes && pipedRes.length > 0) return pipedRes;
+                    }
                 }
             }
         } catch (e) {
-            console.warn('iTunes API fallback failed:', e);
+            console.warn('Open YouTube suggest fallback failed:', e);
         }
 
         return [];

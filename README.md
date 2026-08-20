@@ -31,7 +31,8 @@ A modern, high-performance, client-side web application to convert CSV track lis
 4. **⏯️ Embedded Video Preview Player**:
    - Popup modal iframe player allows you to play audio/video and visually verify songs before creating your playlist.
 
-5. **🔗 Search Link & Direct URL Converter**:
+5. **🔗 Open YouTube APIs & Libraries Pipeline**:
+   - Uses exclusively open YouTube libraries and endpoints: Official YouTube Data API v3, Piped Public APIs, Invidious instances, and YouTube AutoComplete suggest endpoints.
    - Automatically parses pasted lists of YouTube search URLs (`search_query=...`) or direct video links and resolves them into verified video matches.
 
 6. **100% Client-Side JS (Zero Backend)**:
