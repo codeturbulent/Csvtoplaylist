@@ -494,7 +494,12 @@
         if (input) input.value = track.searchQuery;
         if (modal) modal.classList.remove('hidden');
 
-        renderSwapCandidates(track.allMatches || []);
+        // If no matches yet, trigger a fresh search automatically for this track
+        if (!track.allMatches || track.allMatches.length === 0) {
+            executeSwapSearch();
+        } else {
+            renderSwapCandidates(track.allMatches || []);
+        }
     }
 
     function renderSwapCandidates(items) {
@@ -515,14 +520,17 @@
         );
     }
 
-    document.getElementById('btn-close-swap-modal')?.addEventListener('click', () => {
-        document.getElementById('modal-swap-match')?.classList.add('hidden');
-    });
+    async function executeSwapSearch() {
+        const input = document.getElementById('swap-search-input');
+        const btnSearch = document.getElementById('btn-execute-swap-search');
+        const grid = document.getElementById('swap-results-container');
+        const query = input?.value.trim();
 
-    document.getElementById('btn-execute-swap-search')?.addEventListener('click', async () => {
-        const query = document.getElementById('swap-search-input')?.value.trim();
         if (!query || !state.activeSwapTrack) return;
-        
+
+        if (btnSearch) btnSearch.disabled = true;
+        if (grid) grid.innerHTML = `<div class="text-center text-muted" style="grid-column:1/-1; padding:2rem;"><i class="fa-solid fa-spinner fa-spin icon-red" style="font-size:1.5rem;"></i><br><br>Searching YouTube for "${UIManager.escapeHtml(query)}"...</div>`;
+
         try {
             const results = await YouTubeAPI.searchVideos(
                 query, 
@@ -530,9 +538,27 @@
                 state.activeSwapTrack.trackName, 
                 state.activeSwapTrack.artistName
             );
+
+            state.activeSwapTrack.allMatches = results;
             renderSwapCandidates(results);
         } catch (err) {
-            alert('Search failed: ' + err.message);
+            if (grid) grid.innerHTML = `<div class="text-center text-muted" style="grid-column:1/-1; padding:1.5rem;">Search failed: ${UIManager.escapeHtml(err.message)}</div>`;
+        } finally {
+            if (btnSearch) btnSearch.disabled = false;
+        }
+    }
+
+    document.getElementById('btn-close-swap-modal')?.addEventListener('click', () => {
+        document.getElementById('modal-swap-match')?.classList.add('hidden');
+    });
+
+    document.getElementById('btn-execute-swap-search')?.addEventListener('click', executeSwapSearch);
+    
+    // Support Enter key press inside Swap search input box
+    document.getElementById('swap-search-input')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            executeSwapSearch();
         }
     });
 })();
