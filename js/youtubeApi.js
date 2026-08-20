@@ -1,18 +1,38 @@
 /**
  * YouTube API Client-Side Module for CSV to YT Playlist Pro
- * Official YouTube Data API Search & OAuth Integration
+ * Persistent OAuth Tokens via localStorage + Official Google API Search
  */
 
 window.YouTubeAPI = {
     DEFAULT_CLIENT_ID: '673637025192-vs4ng236a5g9ck4d1e7uln9fljck1hf0.apps.googleusercontent.com',
     STORAGE_OAUTH_CLIENT_ID: 'yt_playlist_oauth_client_id',
+    STORAGE_ACCESS_TOKEN: 'yt_playlist_access_token',
+    STORAGE_TOKEN_EXPIRY: 'yt_playlist_token_expiry',
+    
     accessToken: null,
     tokenClient: null,
 
+    /**
+     * Initialize & restore saved login token from localStorage
+     */
     init() {
-        const saved = localStorage.getItem(this.STORAGE_OAUTH_CLIENT_ID);
+        const savedClientId = localStorage.getItem(this.STORAGE_OAUTH_CLIENT_ID) || this.DEFAULT_CLIENT_ID;
+        const savedToken = localStorage.getItem(this.STORAGE_ACCESS_TOKEN);
+        const savedExpiry = localStorage.getItem(this.STORAGE_TOKEN_EXPIRY);
+
+        // Check if saved OAuth token is still valid
+        if (savedToken && savedExpiry && Date.now() < parseInt(savedExpiry, 10)) {
+            this.accessToken = savedToken;
+        } else {
+            // Token expired or missing
+            this.accessToken = null;
+            localStorage.removeItem(this.STORAGE_ACCESS_TOKEN);
+            localStorage.removeItem(this.STORAGE_TOKEN_EXPIRY);
+        }
+
         return {
-            clientId: saved || this.DEFAULT_CLIENT_ID
+            clientId: savedClientId,
+            isAuthenticated: !!this.accessToken
         };
     },
 
@@ -27,7 +47,7 @@ window.YouTubeAPI = {
     },
 
     /**
-     * Request Google OAuth 2.0 Token via Google Identity Services Popup
+     * Request Google OAuth 2.0 Token & save to localStorage
      */
     requestOAuthToken(clientId, callback) {
         const activeClientId = (clientId || this.getClientId()).trim();
@@ -51,7 +71,15 @@ window.YouTubeAPI = {
                         callback(false, response.error);
                         return;
                     }
+
                     this.accessToken = response.access_token;
+                    const expiresInSeconds = response.expires_in || 3600;
+                    const expiryTime = Date.now() + (expiresInSeconds * 1000);
+
+                    // Save token to localStorage for persistent login across page reloads!
+                    localStorage.setItem(this.STORAGE_ACCESS_TOKEN, this.accessToken);
+                    localStorage.setItem(this.STORAGE_TOKEN_EXPIRY, expiryTime.toString());
+
                     callback(true, this.accessToken);
                 }
             });
@@ -64,10 +92,19 @@ window.YouTubeAPI = {
     },
 
     /**
-     * Search Videos using Official Google YouTube Data API v3 or iTunes Fallback
+     * Log Out & Clear stored token
+     */
+    logout() {
+        this.accessToken = null;
+        localStorage.removeItem(this.STORAGE_ACCESS_TOKEN);
+        localStorage.removeItem(this.STORAGE_TOKEN_EXPIRY);
+    },
+
+    /**
+     * Search Videos using Official Google YouTube Data API v3 (Prioritized)
      */
     async searchVideos(query, maxResults = 5) {
-        // 1. If user is signed in with Google, use official YouTube Data API v3 (100% Reliable!)
+        // 1. If user is authenticated, use Official YouTube Data API (100% accurate!)
         if (this.accessToken) {
             try {
                 const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(query)}&maxResults=${maxResults}`;
@@ -92,7 +129,7 @@ window.YouTubeAPI = {
             }
         }
 
-        // 2. Try Scraper / Public Proxies
+        // 2. Scrape Real YouTube Video IDs via CORS Proxy
         try {
             const scraped = await this.scrapeRealYouTubeVideos(query, maxResults);
             if (scraped && scraped.length > 0) return scraped;
@@ -100,13 +137,10 @@ window.YouTubeAPI = {
             console.warn('Scraper error:', e);
         }
 
-        // 3. iTunes Track Search Fallback (Free, zero CORS block, returns accurate song metadata)
+        // 3. iTunes Track Search Fallback
         return await this.searchItunesFallback(query);
     },
 
-    /**
-     * Scrape Real YouTube Video IDs via CORS Proxy
-     */
     async scrapeRealYouTubeVideos(query, maxResults = 5) {
         const targetUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
         const corsProxies = [
@@ -148,9 +182,6 @@ window.YouTubeAPI = {
         return null;
     },
 
-    /**
-     * iTunes API Metadata Search Fallback (Zero CORS, 100% Free)
-     */
     async searchItunesFallback(query) {
         try {
             const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=3`;
@@ -159,7 +190,7 @@ window.YouTubeAPI = {
                 const data = await res.json();
                 if (data.results && data.results.length > 0) {
                     return data.results.map(r => ({
-                        videoId: '', // Will open YouTube search tab if clicked
+                        videoId: '',
                         title: `${r.trackName} - ${r.artistName}`,
                         channelTitle: r.artistName,
                         thumbnail: r.artworkUrl100 || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100&auto=format&fit=crop&q=60',
@@ -171,7 +202,6 @@ window.YouTubeAPI = {
             console.warn('iTunes API fallback failed:', e);
         }
 
-        // Final direct YouTube search URL object
         return [{
             videoId: '',
             title: `${query} (Search on YouTube)`,
@@ -181,9 +211,6 @@ window.YouTubeAPI = {
         }];
     },
 
-    /**
-     * Create REAL YouTube Playlist in User's Google Account Library
-     */
     async createPlaylistInAccount(title, privacy = 'unlisted') {
         if (!this.accessToken) {
             throw new Error('Google OAuth Sign-In is required to create playlists in your account.');
@@ -218,9 +245,6 @@ window.YouTubeAPI = {
         return data.id;
     },
 
-    /**
-     * Add Video Item to User's YouTube Playlist
-     */
     async addVideoToPlaylist(playlistId, videoId) {
         if (!this.accessToken) {
             throw new Error('Google OAuth Sign-In required.');

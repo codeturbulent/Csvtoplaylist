@@ -1,6 +1,6 @@
 /**
  * Streamlined Mobile Controller for CSV to YT Playlist Pro
- * Google OAuth 2.0 Direct Account Playlist Creation
+ * Persistent Login + Google OAuth 2.0 Direct Account Playlist Creation
  */
 
 (function () {
@@ -16,12 +16,15 @@
     document.addEventListener('DOMContentLoaded', () => {
         UIManager.init();
 
-        // Load saved Client ID
-        const savedClientId = YouTubeAPI.init().clientId;
+        // 1. Initialize & restore persistent login session from localStorage
+        const authStatus = YouTubeAPI.init();
         const clientIdInput = document.getElementById('cfg-client-id');
-        if (clientIdInput && savedClientId) {
-            clientIdInput.value = savedClientId;
+        if (clientIdInput && authStatus.clientId) {
+            clientIdInput.value = authStatus.clientId;
         }
+
+        // 2. Update UI if user is already logged in
+        updateAuthUI(authStatus.isAuthenticated);
 
         bindFileUploadEvents();
         bindMappingEvents();
@@ -29,6 +32,28 @@
         bindExecutionEvents();
         bindExportEvents();
     });
+
+    function updateAuthUI(isAuthenticated) {
+        const statusDisplay = document.getElementById('oauth-status-display');
+        const statusHeader = document.getElementById('oauth-status-header');
+        const btnLoginHeader = document.getElementById('btn-oauth-header');
+
+        if (isAuthenticated) {
+            if (statusDisplay) statusDisplay.innerHTML = 'Status: <strong style="color:#00e676;">Signed In with Google</strong>';
+            if (statusHeader) statusHeader.innerText = 'Connected';
+            if (btnLoginHeader) {
+                btnLoginHeader.className = 'btn btn-sm btn-secondary';
+                btnLoginHeader.innerHTML = '<i class="fa-solid fa-circle-check" style="color:#00e676;"></i> Connected';
+            }
+        } else {
+            if (statusDisplay) statusDisplay.innerHTML = 'Status: <strong>Not Signed In</strong>';
+            if (statusHeader) statusHeader.innerText = 'Sign In with Google';
+            if (btnLoginHeader) {
+                btnLoginHeader.className = 'btn btn-sm btn-primary';
+                btnLoginHeader.innerHTML = '<i class="fa-brands fa-google"></i> Sign In with Google';
+            }
+        }
+    }
 
     /* ==========================================================================
        1. UPLOAD & PARSING
@@ -216,8 +241,6 @@
         const btnLogin = document.getElementById('btn-gsi-login');
         const btnHeaderOAuth = document.getElementById('btn-oauth-header');
         const clientIdInput = document.getElementById('cfg-client-id');
-        const statusDisplay = document.getElementById('oauth-status-display');
-        const statusHeader = document.getElementById('oauth-status-header');
         const linkGuide = document.getElementById('link-how-to-get-client-id');
         const modalGuide = document.getElementById('modal-client-guide');
         const btnCloseGuide = document.getElementById('btn-close-guide-modal');
@@ -233,8 +256,7 @@
 
             YouTubeAPI.requestOAuthToken(clientId, (success, tokenOrErr) => {
                 if (success) {
-                    if (statusDisplay) statusDisplay.innerHTML = 'Status: <strong style="color:#00e676;">Signed In with Google</strong>';
-                    if (statusHeader) statusHeader.innerText = 'Connected';
+                    updateAuthUI(true);
                     alert('Successfully connected to Google!');
                 } else {
                     alert('Google Sign-In Error: ' + tokenOrErr);
@@ -270,7 +292,7 @@
 
         btnCreate?.addEventListener('click', async () => {
             if (!YouTubeAPI.accessToken) {
-                const proceed = confirm('Google OAuth Sign-In is required to create playlists directly in your account.\n\nSign in with Google now?');
+                const proceed = confirm('Google OAuth Sign-In is required to create playlists in your account.\n\nSign in with Google now?');
                 if (proceed) {
                     document.getElementById('btn-gsi-login')?.click();
                 }
@@ -292,14 +314,12 @@
             try {
                 if (statusLabel) statusLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin icon-red"></i> Creating playlist "${title}"...`;
                 
-                // 1. Create Playlist Object on YouTube Channel
                 const playlistId = await YouTubeAPI.createPlaylistInAccount(title, privacy);
                 const playlistUrl = `https://www.youtube.com/playlist?list=${playlistId}`;
 
                 let successCount = 0;
                 const total = matchedTracks.length;
 
-                // 2. Add Video Items sequentially with progress updates
                 for (let i = 0; i < total; i++) {
                     const track = matchedTracks[i];
                     const pct = Math.round(((i + 1) / total) * 100);
@@ -318,13 +338,11 @@
                     await new Promise(res => setTimeout(res, 500));
                 }
 
-                // Finish
                 progressContainer?.classList.add('hidden');
                 resultSuccessBox?.classList.remove('hidden');
                 if (resultText) resultText.innerText = `Added ${successCount} out of ${total} songs to your YouTube Account!`;
                 if (openLinkBtn) openLinkBtn.href = playlistUrl;
 
-                // Automatically open new playlist tab
                 window.open(playlistUrl, '_blank');
 
             } catch (err) {
