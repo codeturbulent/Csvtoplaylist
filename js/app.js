@@ -373,38 +373,64 @@
             progressContainer?.classList.remove('hidden');
 
             try {
-                if (statusLabel) statusLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin icon-red"></i> Creating playlist "${title}"...`;
-                
-                const playlistId = await YouTubeAPI.createPlaylistInAccount(title, privacy);
-                const playlistUrl = `https://www.youtube.com/playlist?list=${playlistId}`;
-
-                let successCount = 0;
                 const total = matchedTracks.length;
+                const CHUNK_SIZE = 200; // YouTube safe playlist size chunk
+                
+                // For large playlists (>200 songs, e.g. 700 songs), auto-split into Parts to avoid YouTube API quota limits!
+                const chunks = [];
+                for (let i = 0; i < total; i += CHUNK_SIZE) {
+                    chunks.push(matchedTracks.slice(i, i + CHUNK_SIZE));
+                }
 
-                // Run video insertions with 4 parallel tasks
-                await runInParallel(matchedTracks, 4, async (track) => {
-                    try {
-                        await YouTubeAPI.addVideoToPlaylist(playlistId, track.youtubeMatch.videoId);
-                        successCount++;
-                    } catch (e) {
-                        console.warn(`Failed to add song ${track.youtubeMatch.title}:`, e);
-                    }
-                }, (completed, totalCount, track) => {
-                    const pct = Math.round((completed / totalCount) * 100);
-                    if (fillBar) fillBar.style.width = `${pct}%`;
-                    if (countText) countText.innerText = `${completed} / ${totalCount} (${pct}%)`;
-                    if (statusLabel) statusLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin icon-red"></i> Parallel adding "${track.youtubeMatch.title}"...`;
-                });
+                let totalSuccess = 0;
+                let firstPlaylistUrl = '';
+
+                for (let partIdx = 0; partIdx < chunks.length; partIdx++) {
+                    const chunk = chunks[partIdx];
+                    const partTitle = chunks.length > 1 ? `${title} (Part ${partIdx + 1} of ${chunks.length})` : title;
+
+                    if (statusLabel) statusLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin icon-red"></i> Creating YouTube playlist "${partTitle}"...`;
+                    
+                    const playlistId = await YouTubeAPI.createPlaylistInAccount(partTitle, privacy);
+                    const playlistUrl = `https://www.youtube.com/playlist?list=${playlistId}`;
+                    if (!firstPlaylistUrl) firstPlaylistUrl = playlistUrl;
+
+                    let partSuccess = 0;
+                    await runInParallel(chunk, 4, async (track) => {
+                        try {
+                            await YouTubeAPI.addVideoToPlaylist(playlistId, track.youtubeMatch.videoId);
+                            partSuccess++;
+                            totalSuccess++;
+                        } catch (e) {
+                            if (e.message && (e.message.includes('quota') || e.message.includes('403'))) {
+                                throw new Error('QUOTA_EXCEEDED');
+                            }
+                            console.warn(`Failed to add song ${track.youtubeMatch.title}:`, e);
+                        }
+                    }, (completed, totalCount, track) => {
+                        const globalProcessed = totalSuccess;
+                        const pct = Math.round((globalProcessed / total) * 100);
+                        if (fillBar) fillBar.style.width = `${pct}%`;
+                        if (countText) countText.innerText = `${globalProcessed} / ${total} (${pct}%)`;
+                        if (statusLabel) statusLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin icon-red"></i> Adding "${track.youtubeMatch.title}" to Part ${partIdx + 1}...`;
+                    });
+
+                    await new Promise(res => setTimeout(res, 500));
+                }
 
                 progressContainer?.classList.add('hidden');
                 resultSuccessBox?.classList.remove('hidden');
-                if (resultText) resultText.innerText = `Added ${successCount} out of ${total} verified songs directly to your YouTube Account!`;
-                if (openLinkBtn) openLinkBtn.href = playlistUrl;
+                if (resultText) resultText.innerText = `Successfully added ${totalSuccess} out of ${total} verified songs into ${chunks.length} YouTube Playlists!`;
+                if (openLinkBtn) openLinkBtn.href = firstPlaylistUrl;
 
-                window.open(playlistUrl, '_blank');
+                window.open(firstPlaylistUrl, '_blank');
 
             } catch (err) {
-                alert('Failed to create playlist: ' + err.message);
+                if (err.message === 'QUOTA_EXCEEDED') {
+                    alert('Google YouTube API Daily Quota reached for this Client ID.\n\nTip: You can use "Download M3U Playlist File" or "Copy Verified YouTube Links" below to import the remaining songs instantly!');
+                } else {
+                    alert('Failed to create playlist: ' + err.message);
+                }
             } finally {
                 btnCreate.disabled = false;
             }
