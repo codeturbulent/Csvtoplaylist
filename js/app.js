@@ -208,15 +208,51 @@
         });
     }
 
+    /**
+     * High-Performance Parallel Task Execution Queue
+     * Runs taskFn concurrently across items with up to `concurrency` parallel workers
+     */
+    async function runInParallel(items, concurrency, taskFn, onProgress) {
+        let index = 0;
+        let completed = 0;
+        const total = items.length;
+        if (total === 0) return;
+
+        const workers = Array.from({ length: Math.min(concurrency, total) }, async () => {
+            while (index < total) {
+                const currentIndex = index++;
+                const item = items[currentIndex];
+                try {
+                    await taskFn(item, currentIndex);
+                } catch (err) {
+                    console.warn(`Worker error on item ${currentIndex}:`, err);
+                } finally {
+                    completed++;
+                    if (onProgress) onProgress(completed, total, item);
+                }
+            }
+        });
+
+        await Promise.all(workers);
+    }
+
     async function executeTrackSearchBatch() {
         const total = state.tracks.length;
+        if (total === 0) return;
 
-        for (let i = 0; i < total; i++) {
-            const track = state.tracks[i];
+        const speedSelect = document.getElementById('search-speed-select');
+        const concurrency = speedSelect ? parseInt(speedSelect.value, 10) || 6 : 6;
+
+        UIManager.updateProgress(0, total, `Launching ${concurrency} parallel search tasks...`);
+
+        // Mark all as searching initially
+        state.tracks.forEach(t => { if (t.status === 'pending') t.status = 'searching'; });
+        UIManager.renderTrackCards(state.tracks, openSwapModal, (v) => UIManager.openPreviewModal(v));
+
+        let lastRenderTime = 0;
+
+        await runInParallel(state.tracks, concurrency, async (track, idx) => {
             track.status = 'searching';
-            
-            UIManager.updateProgress(i + 1, total, `Matching "${track.trackName}"...`);
-            UIManager.renderTrackCards(state.tracks, openSwapModal, (v) => UIManager.openPreviewModal(v));
 
             try {
                 const results = await YouTubeAPI.searchVideos(track.searchQuery, 4, track.trackName, track.artistName);
@@ -234,12 +270,19 @@
                 track.youtubeMatch = null;
                 track.allMatches = [];
             }
+        }, (completed, totalCount, lastTrack) => {
+            UIManager.updateProgress(completed, totalCount, `Parallel searching: ${completed} / ${totalCount} songs matched...`);
+            
+            // Throttle card UI renders to avoid browser lag
+            const now = Date.now();
+            if (now - lastRenderTime > 200 || completed === totalCount) {
+                lastRenderTime = now;
+                UIManager.renderTrackCards(state.tracks, openSwapModal, (v) => UIManager.openPreviewModal(v));
+            }
+        });
 
-            UIManager.renderTrackCards(state.tracks, openSwapModal, (v) => UIManager.openPreviewModal(v));
-            await new Promise(res => setTimeout(res, 150));
-        }
-
-        UIManager.updateProgress(total, total, 'Completed!');
+        UIManager.updateProgress(total, total, 'Completed all parallel searches!');
+        UIManager.renderTrackCards(state.tracks, openSwapModal, (v) => UIManager.openPreviewModal(v));
         updateStep3Summary();
     }
 
@@ -295,7 +338,7 @@
     }
 
     /* ==========================================================================
-       4. GOOGLE OAUTH DIRECT PLAYLIST CREATION (STEP 3)
+       4. GOOGLE OAUTH DIRECT PLAYLIST CREATION IN PARALLEL (STEP 3)
        ========================================================================== */
     function bindExecutionEvents() {
         const btnCreate = document.getElementById('btn-create-account-playlist');
@@ -338,23 +381,20 @@
                 let successCount = 0;
                 const total = matchedTracks.length;
 
-                for (let i = 0; i < total; i++) {
-                    const track = matchedTracks[i];
-                    const pct = Math.round(((i + 1) / total) * 100);
-
-                    if (fillBar) fillBar.style.width = `${pct}%`;
-                    if (countText) countText.innerText = `${i + 1} / ${total} (${pct}%)`;
-                    if (statusLabel) statusLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin icon-red"></i> Adding "${track.youtubeMatch.title}"...`;
-
+                // Run video insertions with 4 parallel tasks
+                await runInParallel(matchedTracks, 4, async (track) => {
                     try {
                         await YouTubeAPI.addVideoToPlaylist(playlistId, track.youtubeMatch.videoId);
                         successCount++;
                     } catch (e) {
                         console.warn(`Failed to add song ${track.youtubeMatch.title}:`, e);
                     }
-
-                    await new Promise(res => setTimeout(res, 400));
-                }
+                }, (completed, totalCount, track) => {
+                    const pct = Math.round((completed / totalCount) * 100);
+                    if (fillBar) fillBar.style.width = `${pct}%`;
+                    if (countText) countText.innerText = `${completed} / ${totalCount} (${pct}%)`;
+                    if (statusLabel) statusLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin icon-red"></i> Parallel adding "${track.youtubeMatch.title}"...`;
+                });
 
                 progressContainer?.classList.add('hidden');
                 resultSuccessBox?.classList.remove('hidden');
