@@ -219,8 +219,8 @@ window.YouTubeAPI = {
     },
 
     /**
-     * Search YouTube Videos with Strict Video Match Filtering & Verification Scoring
-     * Strictly EXCLUDES generic YouTube search links (results?search_query=...)
+     * Search YouTube Videos with Multi-Source Fallback Pipeline & Verification Scoring
+     * Sources: 1) Official OAuth API, 2) Piped Public APIs, 3) Invidious Public APIs, 4) Scraper, 5) iTunes API
      */
     async searchVideos(query, maxResults = 5, trackName = '', artistName = '') {
         const directVideoId = this.extractVideoId(query);
@@ -263,11 +263,21 @@ window.YouTubeAPI = {
                     }
                 }
             } catch (e) {
-                console.warn('Official OAuth Search failed, trying scrapers:', e);
+                console.warn('Official OAuth Search failed:', e);
             }
         }
 
-        // 2. Scrape Real YouTube Videos via CORS Proxies with JSON Metadata Extraction
+        // 2. Piped Public Search APIs (High-speed, reliable JSON endpoints)
+        if (candidates.length === 0) {
+            try {
+                const pipedCandidates = await this.searchPipedPublicApi(query, maxResults);
+                if (pipedCandidates && pipedCandidates.length > 0) candidates = pipedCandidates;
+            } catch (e) {
+                console.warn('Piped API search error:', e);
+            }
+        }
+
+        // 3. Scrape Real YouTube Videos via CORS Proxies with Backward/Forward Regex
         if (candidates.length === 0) {
             try {
                 const scraped = await this.scrapeRealYouTubeVideos(query, maxResults);
@@ -277,17 +287,27 @@ window.YouTubeAPI = {
             }
         }
 
-        // 3. Fallback to Invidious & Public Video Search APIs
+        // 4. Invidious Public Video Search APIs
         if (candidates.length === 0) {
             try {
                 const invidiousCandidates = await this.searchInvidiousPublicApi(query, maxResults);
                 if (invidiousCandidates && invidiousCandidates.length > 0) candidates = invidiousCandidates;
             } catch (e) {
-                console.warn('Invidious fallback error:', e);
+                console.warn('Invidious API error:', e);
             }
         }
 
-        // Filter OUT any invalid video IDs or search links (no search_query links allowed as video matches!)
+        // 5. iTunes API + Query Resolver Fallback
+        if (candidates.length === 0) {
+            try {
+                const itunesCandidates = await this.searchItunesFallback(query, maxResults);
+                if (itunesCandidates && itunesCandidates.length > 0) candidates = itunesCandidates;
+            } catch (e) {
+                console.warn('iTunes API fallback error:', e);
+            }
+        }
+
+        // Filter OUT any invalid video IDs or search links
         const validVideos = candidates.filter(v => v.videoId && /^[a-zA-Z0-9_-]{11}$/.test(v.videoId));
 
         // Compute verification score for each candidate video
@@ -302,9 +322,50 @@ window.YouTubeAPI = {
         return validVideos;
     },
 
+    async searchPipedPublicApi(query, maxResults = 5) {
+        const instances = [
+            'https://pipedapi.kavin.rocks',
+            'https://pipedapi.privacy.com.de',
+            'https://api.piped.privacydev.net'
+        ];
+
+        for (const baseUrl of instances) {
+            try {
+                const url = `${baseUrl}/search?q=${encodeURIComponent(query)}&filter=videos`;
+                const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
+                if (!res.ok) continue;
+                const data = await res.json();
+
+                const items = data.items || data;
+                if (Array.isArray(items) && items.length > 0) {
+                    const parsed = [];
+                    for (const item of items) {
+                        if (parsed.length >= maxResults) break;
+                        const vId = item.url ? item.url.replace('/watch?v=', '') : item.id;
+                        if (vId && /^[a-zA-Z0-9_-]{11}$/.test(vId)) {
+                            parsed.push({
+                                videoId: vId,
+                                title: item.title || query,
+                                channelTitle: item.uploaderName || 'YouTube',
+                                thumbnail: item.thumbnail || `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`,
+                                url: `https://www.youtube.com/watch?v=${vId}`
+                            });
+                        }
+                    }
+                    if (parsed.length > 0) return parsed;
+                }
+            } catch (e) {
+                console.warn(`Piped instance ${baseUrl} failed:`, e);
+            }
+        }
+
+        return [];
+    },
+
     async scrapeRealYouTubeVideos(query, maxResults = 5) {
         const targetUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
         const corsProxies = [
+            `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
             `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
             `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`
         ];
@@ -336,8 +397,9 @@ window.YouTubeAPI = {
             if (!seen.has(vId)) {
                 seen.add(vId);
 
-                const index = match.index;
-                const snippet = html.substring(index, index + 1500);
+                // Look 1000 chars backward and 1500 chars forward to capture title and channel name
+                const startIndex = Math.max(0, match.index - 1000);
+                const snippet = html.substring(startIndex, match.index + 1500);
 
                 let title = query;
                 const titleMatch = snippet.match(/"title":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"/);
@@ -367,8 +429,8 @@ window.YouTubeAPI = {
     async searchInvidiousPublicApi(query, maxResults = 5) {
         const instances = [
             'https://inv.tux.pizza',
-            'https://vid.puffyan.us',
-            'https://invidious.drgns.space'
+            'https://invidious.drgns.space',
+            'https://vid.puffyan.us'
         ];
 
         for (const baseUrl of instances) {
@@ -390,6 +452,25 @@ window.YouTubeAPI = {
             } catch (e) {
                 console.warn(`Invidious instance ${baseUrl} failed:`, e);
             }
+        }
+
+        return [];
+    },
+
+    async searchItunesFallback(query, maxResults = 5) {
+        try {
+            const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=3`;
+            const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+            if (res.ok) {
+                const data = await res.json();
+                if (data.results && data.results.length > 0) {
+                    const firstTrack = data.results[0];
+                    const cleanTerm = `${firstTrack.trackName} ${firstTrack.artistName}`;
+                    return await this.searchPipedPublicApi(cleanTerm, maxResults);
+                }
+            }
+        } catch (e) {
+            console.warn('iTunes API fallback failed:', e);
         }
 
         return [];

@@ -218,7 +218,10 @@
         const total = items.length;
         if (total === 0) return;
 
-        const workers = Array.from({ length: Math.min(concurrency, total) }, async () => {
+        const workers = Array.from({ length: Math.min(concurrency, total) }, async (_, workerIdx) => {
+            // Stagger parallel worker launches slightly to prevent public API burst blocks
+            await new Promise(res => setTimeout(res, workerIdx * 40));
+
             while (index < total) {
                 const currentIndex = index++;
                 const item = items[currentIndex];
