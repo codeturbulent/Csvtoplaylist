@@ -38,9 +38,9 @@
                     <h1>CSV <span class="text-gradient">to YT Playlist</span></h1>
                 </div>
             </div>
-            <button id="btn-oauth-header" class="btn btn-sm btn-secondary">
+            <button id="btn-oauth-header" class="btn btn-sm btn-primary">
                 <i class="fa-brands fa-google"></i>
-                <span id="oauth-status-header">Google Sign-In</span>
+                <span id="oauth-status-header">Sign In with Google</span>
             </button>
         </div>
     </header>
@@ -157,8 +157,7 @@
                 <div class="oauth-config-box">
                     <div class="form-group">
                         <label for="cfg-client-id"><i class="fa-solid fa-key"></i> Google OAuth Client ID</label>
-                        <input type="text" id="cfg-client-id" class="form-control" placeholder="123456789-xxxx.apps.googleusercontent.com">
-                        <small class="text-muted" style="font-size:0.75rem;">Saved locally in your browser. <a href="#" id="link-how-to-get-client-id" style="color:var(--accent-red);">How to get one?</a></small>
+                        <input type="text" id="cfg-client-id" class="form-control" value="673637025192-vs4ng236a5g9ck4d1e7uln9fljck1hf0.apps.googleusercontent.com">
                     </div>
 
                     <div class="oauth-login-status">
@@ -227,25 +226,6 @@
         </section>
 
     </main>
-
-    <!-- Client ID Guide Modal -->
-    <div id="modal-client-guide" class="modal-overlay hidden">
-        <div class="modal-card">
-            <div class="modal-header">
-                <h3><i class="fa-solid fa-key icon-red"></i> How to Get a Free Client ID</h3>
-                <button class="modal-close" id="btn-close-guide-modal"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div class="modal-body" style="font-size:0.88rem;">
-                <ol style="padding-left:1.2rem; display:flex; flex-direction:column; gap:0.6rem;">
-                    <li>Open <a href="https://console.cloud.google.com/" target="_blank" style="color:var(--accent-red);">Google Cloud Console</a> and create a project.</li>
-                    <li>Go to <strong>APIs & Services > Library</strong>, search <strong>YouTube Data API v3</strong>, and click <strong>Enable</strong>.</li>
-                    <li>Go to <strong>Credentials > Create Credentials > OAuth client ID</strong> (Select <strong>Web application</strong>).</li>
-                    <li>Add <code>http://localhost:8080</code> (or your site URL) under <strong>Authorized JavaScript origins</strong>.</li>
-                    <li>Copy your <strong>Client ID</strong> and paste it here!</li>
-                </ol>
-            </div>
-        </div>
-    </div>
 
     <!-- Swap Video Modal -->
     <div id="modal-swap-match" class="modal-overlay hidden">

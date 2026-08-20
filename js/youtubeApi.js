@@ -1,16 +1,18 @@
 /**
  * YouTube API Client-Side Module for CSV to YT Playlist Pro
- * Pure Frontend Implementation with Google OAuth 2.0 Direct Account Playlist Creation
+ * Embedded Google OAuth 2.0 Client ID for 1-Click Sign-In
  */
 
 window.YouTubeAPI = {
+    DEFAULT_CLIENT_ID: '673637025192-vs4ng236a5g9ck4d1e7uln9fljck1hf0.apps.googleusercontent.com',
     STORAGE_OAUTH_CLIENT_ID: 'yt_playlist_oauth_client_id',
     accessToken: null,
     tokenClient: null,
 
     init() {
+        const saved = localStorage.getItem(this.STORAGE_OAUTH_CLIENT_ID);
         return {
-            clientId: localStorage.getItem(this.STORAGE_OAUTH_CLIENT_ID) || ''
+            clientId: saved || this.DEFAULT_CLIENT_ID
         };
     },
 
@@ -20,12 +22,17 @@ window.YouTubeAPI = {
         }
     },
 
+    getClientId() {
+        return localStorage.getItem(this.STORAGE_OAUTH_CLIENT_ID) || this.DEFAULT_CLIENT_ID;
+    },
+
     /**
      * Request Google OAuth 2.0 Token via Google Identity Services Popup
      */
     requestOAuthToken(clientId, callback) {
-        if (!clientId) {
-            alert('Please enter your Google OAuth Client ID first.');
+        const activeClientId = (clientId || this.getClientId()).trim();
+        if (!activeClientId) {
+            alert('Google OAuth Client ID is missing.');
             return;
         }
 
@@ -36,7 +43,7 @@ window.YouTubeAPI = {
 
         try {
             this.tokenClient = google.accounts.oauth2.initTokenClient({
-                client_id: clientId.trim(),
+                client_id: activeClientId,
                 scope: 'https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube.force-ssl',
                 callback: (response) => {
                     if (response.error) {
@@ -90,7 +97,7 @@ window.YouTubeAPI = {
         }
 
         const data = await res.json();
-        return data.id; // Returns YouTube Playlist ID
+        return data.id;
     },
 
     /**
