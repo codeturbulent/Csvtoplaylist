@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CSV to YouTube Playlist Pro</title>
+    <meta name="description" content="Convert CSV files into real YouTube Playlists directly on your Google Account.">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <!-- PapaParse for CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+    <!-- Google Identity Services SDK for OAuth2 -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <!-- Mobile-First Custom CSS -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="dark-theme">
+    <div class="app-background">
+        <div class="bg-glow bg-glow-1"></div>
+        <div class="bg-glow bg-glow-2"></div>
+    </div>
+
+    <!-- Header Navigation -->
+    <header class="app-header">
+        <div class="header-container">
+            <div class="brand">
+                <i class="fa-brands fa-youtube icon-yt"></i>
+                <div class="brand-text">
+                    <h1>CSV <span class="text-gradient">to YT Playlist</span></h1>
+                </div>
+            </div>
+            <button id="btn-oauth-header" class="btn btn-sm btn-secondary">
+                <i class="fa-brands fa-google"></i>
+                <span id="oauth-status-header">Google Sign-In</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="main-content">
+        
+        <!-- Mobile Stepper Bar -->
+        <div class="stepper-bar">
+            <div class="step-item active" id="step-nav-1">
+                <span class="step-num">1</span>
+                <span class="step-label">Upload</span>
+            </div>
+            <div class="step-line"></div>
+            <div class="step-item" id="step-nav-2">
+                <span class="step-num">2</span>
+                <span class="step-label">Match</span>
+            </div>
+            <div class="step-line"></div>
+            <div class="step-item" id="step-nav-3">
+                <span class="step-num">3</span>
+                <span class="step-label">Create</span>
+            </div>
+        </div>
+
+        <!-- STEP 1: Upload CSV -->
+        <section id="section-step-1" class="card step-section active">
+            <div class="card-header">
+                <h3><i class="fa-solid fa-file-csv icon-red"></i> Upload CSV or Paste Songs</h3>
+                <button id="btn-load-demo" class="btn btn-sm btn-outline">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Try Demo CSV
+                </button>
+            </div>
+
+            <div class="card-body">
+                <div id="dropzone" class="dropzone">
+                    <input type="file" id="csv-file-input" accept=".csv,.txt" multiple hidden>
+                    <div class="dropzone-content">
+                        <div class="dropzone-icon">
+                            <i class="fa-solid fa-cloud-arrow-up"></i>
+                        </div>
+                        <h4>Tap to select CSV file</h4>
+                        <p>Supports Spotify, Soundiiz, TuneMyMusic, Exportify, etc.</p>
+                    </div>
+                </div>
+
+                <div class="divider-text"><span>OR PASTE TRACKS BELOW</span></div>
+
+                <div class="paste-area-wrapper">
+                    <textarea id="csv-text-input" placeholder="Bohemian Rhapsody, Queen&#10;Hotel California, Eagles&#10;Blinding Lights, The Weeknd"></textarea>
+                    <button id="btn-parse-text" class="btn btn-secondary btn-block">
+                        <i class="fa-solid fa-arrow-right"></i> Process Pasted Songs
+                    </button>
+                </div>
+
+                <div id="file-list-container" class="file-list-container hidden">
+                    <div id="file-list" class="file-list"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- STEP 2: Song Mapping & Match List -->
+        <section id="section-step-2" class="card step-section hidden">
+            <div class="card-header">
+                <h3><i class="fa-solid fa-list-check icon-red"></i> Match Songs</h3>
+                <button id="btn-start-search" class="btn btn-primary">
+                    <i class="fa-solid fa-play"></i> Find Matches & Continue
+                </button>
+            </div>
+
+            <div class="card-body">
+                <div id="mobile-progress-container" class="mobile-progress-container hidden">
+                    <div class="progress-info">
+                        <span id="progress-status-label"><i class="fa-solid fa-spinner fa-spin"></i> Matching songs...</span>
+                        <span id="progress-count-text">0 / 0</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <div class="mapping-box">
+                    <div class="mapping-grid">
+                        <div class="form-group">
+                            <label for="map-track">Song Title Column</label>
+                            <select id="map-track" class="form-select"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="map-artist">Artist Column</label>
+                            <select id="map-artist" class="form-select"></select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="track-summary-bar">
+                    <span>Songs: <strong id="total-songs-count">0</strong></span>
+                    <input type="text" id="filter-tracks" class="form-control form-control-sm" placeholder="Filter songs...">
+                </div>
+
+                <div id="track-cards-list" class="track-cards-list"></div>
+            </div>
+        </section>
+
+        <!-- STEP 3: Create Playlist Direct to Google Account -->
+        <section id="section-step-3" class="card step-section hidden">
+            <div class="card-header">
+                <h3><i class="fa-brands fa-google icon-red"></i> Save to YouTube Account</h3>
+                <button id="btn-back-step-2" class="btn btn-sm btn-secondary">Back</button>
+            </div>
+
+            <div class="card-body">
+
+                <!-- Client ID Config Box -->
+                <div class="oauth-config-box">
+                    <div class="form-group">
+                        <label for="cfg-client-id"><i class="fa-solid fa-key"></i> Google OAuth Client ID</label>
+                        <input type="text" id="cfg-client-id" class="form-control" placeholder="123456789-xxxx.apps.googleusercontent.com">
+                        <small class="text-muted" style="font-size:0.75rem;">Saved locally in your browser. <a href="#" id="link-how-to-get-client-id" style="color:var(--accent-red);">How to get one?</a></small>
+                    </div>
+
+                    <div class="oauth-login-status">
+                        <span id="oauth-status-display">Status: <strong>Not Signed In</strong></span>
+                        <button id="btn-gsi-login" class="btn btn-sm btn-primary">
+                            <i class="fa-brands fa-google"></i> Sign In with Google
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Playlist Settings Form -->
+                <div class="playlist-form-box">
+                    <div class="form-group">
+                        <label for="playlist-name-input">Playlist Title</label>
+                        <input type="text" id="playlist-name-input" class="form-control" value="My CSV Playlist">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="playlist-privacy-select">Privacy</label>
+                        <select id="playlist-privacy-select" class="form-select">
+                            <option value="unlisted" selected>Unlisted</option>
+                            <option value="private">Private</option>
+                            <option value="public">Public</option>
+                        </select>
+                    </div>
+
+                    <!-- Creation Progress Bar -->
+                    <div id="create-progress-container" class="mobile-progress-container hidden">
+                        <div class="progress-info">
+                            <span id="create-status-label"><i class="fa-solid fa-spinner fa-spin"></i> Creating playlist...</span>
+                            <span id="create-count-text">0 / 0</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div id="create-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <button id="btn-create-account-playlist" class="btn btn-danger btn-lg btn-block glow-btn" style="margin-top: 1rem;">
+                        <i class="fa-brands fa-youtube"></i> Create Playlist in YouTube Account
+                    </button>
+                </div>
+
+                <!-- Success Results Box -->
+                <div id="result-success-box" class="result-success-card hidden" style="margin-top: 1.5rem;">
+                    <div class="success-icon"><i class="fa-solid fa-circle-check"></i></div>
+                    <h2>Playlist Created!</h2>
+                    <p id="result-success-text">Added songs to your YouTube Account library.</p>
+                    <a id="link-open-yt-playlist" href="#" target="_blank" class="btn btn-primary btn-lg btn-block">
+                        <i class="fa-solid fa-up-right-from-square"></i> Open YouTube Playlist
+                    </a>
+                </div>
+
+                <!-- Export Fallbacks -->
+                <div class="export-options-box" style="margin-top: 1.5rem;">
+                    <div class="action-buttons-mobile">
+                        <button id="btn-copy-urls" class="btn btn-secondary btn-block">
+                            <i class="fa-solid fa-copy"></i> Copy Matched YouTube Links
+                        </button>
+                        <button id="btn-export-m3u" class="btn btn-outline btn-block">
+                            <i class="fa-solid fa-download"></i> Download M3U Playlist File
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Client ID Guide Modal -->
+    <div id="modal-client-guide" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-key icon-red"></i> How to Get a Free Client ID</h3>
+                <button class="modal-close" id="btn-close-guide-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body" style="font-size:0.88rem;">
+                <ol style="padding-left:1.2rem; display:flex; flex-direction:column; gap:0.6rem;">
+                    <li>Open <a href="https://console.cloud.google.com/" target="_blank" style="color:var(--accent-red);">Google Cloud Console</a> and create a project.</li>
+                    <li>Go to <strong>APIs & Services > Library</strong>, search <strong>YouTube Data API v3</strong>, and click <strong>Enable</strong>.</li>
+                    <li>Go to <strong>Credentials > Create Credentials > OAuth client ID</strong> (Select <strong>Web application</strong>).</li>
+                    <li>Add <code>http://localhost:8080</code> (or your site URL) under <strong>Authorized JavaScript origins</strong>.</li>
+                    <li>Copy your <strong>Client ID</strong> and paste it here!</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+
+    <!-- Swap Video Modal -->
+    <div id="modal-swap-match" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3><i class="fa-brands fa-youtube icon-red"></i> Swap YouTube Video</h3>
+                <button class="modal-close" id="btn-close-swap-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="search-requery-bar">
+                    <input type="text" id="swap-search-input" class="form-control" placeholder="Search custom query...">
+                    <button id="btn-execute-swap-search" class="btn btn-primary"><i class="fa-solid fa-magnifying-glass"></i></button>
+                </div>
+                <div id="swap-results-container" class="swap-results-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/csvParser.js"></script>
+    <script src="js/youtubeApi.js"></script>
+    <script src="js/uiManager.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
