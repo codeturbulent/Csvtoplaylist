@@ -71,6 +71,61 @@ As It Was,Harry Styles,Harry's House`,
     },
 
     /**
+     * Clean and parse raw input text or YouTube search / video URLs
+     */
+    cleanSearchUrl(rawText) {
+        if (!rawText) return { cleanTitle: '', artist: '', isUrl: false, directVideoId: null };
+
+        const str = String(rawText).trim();
+
+        // Check for direct YouTube video URL or ID
+        const videoIdMatch = str.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+        if (videoIdMatch && videoIdMatch[1]) {
+            return {
+                cleanTitle: str,
+                artist: '',
+                isUrl: true,
+                directVideoId: videoIdMatch[1]
+            };
+        }
+
+        // Check for YouTube search result URL (e.g. results?search_query=...)
+        if (str.includes('youtube.com/results') || str.includes('search_query=')) {
+            try {
+                const urlObj = new URL(str.startsWith('http') ? str : `https://${str}`);
+                const queryParam = urlObj.searchParams.get('search_query');
+                if (queryParam) {
+                    const decoded = decodeURIComponent(queryParam).replace(/\+/g, ' ');
+                    return {
+                        cleanTitle: decoded,
+                        artist: '',
+                        isUrl: true,
+                        directVideoId: null
+                    };
+                }
+            } catch (e) {
+                const qMatch = str.match(/search_query=([^&]+)/);
+                if (qMatch && qMatch[1]) {
+                    const decoded = decodeURIComponent(qMatch[1]).replace(/\+/g, ' ');
+                    return {
+                        cleanTitle: decoded,
+                        artist: '',
+                        isUrl: true,
+                        directVideoId: null
+                    };
+                }
+            }
+        }
+
+        return {
+            cleanTitle: str,
+            artist: '',
+            isUrl: false,
+            directVideoId: null
+        };
+    },
+
+    /**
      * Guess best matching column names for Track, Artist, and Album
      * @param {Array<string>} headers 
      * @returns {Object} { trackCol, artistCol, albumCol }
@@ -85,7 +140,7 @@ As It Was,Harry Styles,Harry's House`,
         // Track title candidates
         const trackCandidates = [
             'track name', 'trackname', 'track_name', 'track', 
-            'song name', 'song title', 'song', 'title', 'name'
+            'song name', 'song title', 'song', 'title', 'name', 'url', 'link'
         ];
 
         // Artist candidates
@@ -105,7 +160,7 @@ As It Was,Harry Styles,Harry's House`,
 
         // Fallbacks if exact match not found
         if (!trackCol) {
-            trackCol = lowerHeaders.find(h => h.lower.includes('track') || h.lower.includes('title') || h.lower.includes('song'))?.original || headers[0];
+            trackCol = lowerHeaders.find(h => h.lower.includes('track') || h.lower.includes('title') || h.lower.includes('song') || h.lower.includes('url'))?.original || headers[0];
         }
         if (!artistCol) {
             artistCol = lowerHeaders.find(h => h.lower.includes('artist') || h.lower.includes('singer'))?.original || (headers[1] || '');
@@ -120,20 +175,42 @@ As It Was,Harry Styles,Harry's House`,
 
     /**
      * Normalize parsed CSV rows into standard Track items
-     * @param {Array} rows 
-     * @param {Object} columnMap { trackCol, artistCol, albumCol }
-     * @param {string} fileName
-     * @returns {Array} List of Track objects
+     * Automatically parses & converts YouTube search URLs into clean search queries!
      */
     normalizeTracks(rows, columnMap, fileName = 'CSV') {
         const tracks = [];
 
         rows.forEach((row, index) => {
-            const trackName = (row[columnMap.trackCol] || '').trim();
-            const artistName = (row[columnMap.artistCol] || '').trim();
+            let rawTrack = (row[columnMap.trackCol] || '').trim();
+            let rawArtist = (row[columnMap.artistCol] || '').trim();
             const albumName = columnMap.albumCol ? (row[columnMap.albumCol] || '').trim() : '';
 
-            if (trackName) {
+            if (rawTrack) {
+                const parsedUrl = this.cleanSearchUrl(rawTrack);
+                let trackName = parsedUrl.cleanTitle || rawTrack;
+                let artistName = rawArtist;
+
+                let youtubeMatch = null;
+                let status = 'pending';
+
+                if (parsedUrl.directVideoId) {
+                    status = 'matched';
+                    youtubeMatch = {
+                        videoId: parsedUrl.directVideoId,
+                        title: trackName,
+                        channelTitle: artistName || 'YouTube',
+                        thumbnail: `https://i.ytimg.com/vi/${parsedUrl.directVideoId}/hqdefault.jpg`,
+                        url: `https://www.youtube.com/watch?v=${parsedUrl.directVideoId}`,
+                        verification: {
+                            score: 100,
+                            status: 'verified',
+                            badgeClass: 'badge-verified',
+                            badgeText: '🟢 100% Direct Link Verified',
+                            reason: 'Direct YouTube video link provided.'
+                        }
+                    };
+                }
+
                 tracks.push({
                     id: `track-${Date.now()}-${index}`,
                     index: index + 1,
@@ -141,9 +218,9 @@ As It Was,Harry Styles,Harry's House`,
                     artistName,
                     albumName,
                     fileName,
-                    searchQuery: artistName ? `${trackName} ${artistName}` : trackName,
-                    status: 'pending', // pending, searching, matched, error
-                    youtubeMatch: null,
+                    searchQuery: parsedUrl.directVideoId ? parsedUrl.directVideoId : (artistName ? `${trackName} ${artistName}` : trackName),
+                    status: status,
+                    youtubeMatch: youtubeMatch,
                     errorMsg: null
                 });
             }
@@ -152,3 +229,4 @@ As It Was,Harry Styles,Harry's House`,
         return tracks;
     }
 };
+

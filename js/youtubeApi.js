@@ -101,10 +101,148 @@ window.YouTubeAPI = {
     },
 
     /**
-     * Search Videos using Official Google YouTube Data API v3 (Prioritized)
+     * Extract 11-char YouTube Video ID from URL or string
      */
-    async searchVideos(query, maxResults = 5) {
-        // 1. If user is authenticated, use Official YouTube Data API (100% accurate!)
+    extractVideoId(input) {
+        if (!input) return null;
+        const str = String(input).trim();
+        if (/^[a-zA-Z0-9_-]{11}$/.test(str)) return str;
+        const reg = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+        const match = str.match(reg);
+        return match ? match[1] : null;
+    },
+
+    /**
+     * Calculate Song Verification & Accuracy Score (0% - 100%)
+     */
+    verifySongMatch(trackName, artistName, videoTitle, channelTitle = '') {
+        if (!videoTitle || !trackName) {
+            return {
+                score: 0,
+                status: 'unverified',
+                badgeClass: 'badge-missing',
+                badgeText: '❌ Unverified',
+                reason: 'Missing title or video metadata'
+            };
+        }
+
+        const cleanStr = (s) => (s || '')
+            .toLowerCase()
+            .replace(/[\(\)\[\]\{\}\-_,.\/\\|:;'"]/g, ' ')
+            .replace(/\b(official|music|video|audio|lyrics|hd|4k|remastered|topic|full|hq|explicit|mv|vevo)\b/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        const cleanTrack = cleanStr(trackName);
+        const cleanArtist = cleanStr(artistName);
+        const cleanVidTitle = cleanStr(videoTitle);
+        const cleanVidChannel = cleanStr(channelTitle);
+
+        let titleScore = 0;
+        let artistScore = 0;
+
+        // Title Matching Logic
+        if (cleanVidTitle.includes(cleanTrack) || cleanTrack.includes(cleanVidTitle)) {
+            titleScore = 1.0;
+        } else {
+            const trackWords = cleanTrack.split(' ').filter(w => w.length > 1);
+            if (trackWords.length > 0) {
+                const matchedWords = trackWords.filter(w => cleanVidTitle.includes(w));
+                titleScore = matchedWords.length / trackWords.length;
+            }
+        }
+
+        // Artist Matching Logic
+        if (cleanArtist) {
+            if (cleanVidTitle.includes(cleanArtist) || cleanVidChannel.includes(cleanArtist)) {
+                artistScore = 1.0;
+            } else {
+                const artistWords = cleanArtist.split(' ').filter(w => w.length > 2);
+                if (artistWords.length > 0) {
+                    const matchedArtistWords = artistWords.filter(w => cleanVidTitle.includes(w) || cleanVidChannel.includes(w));
+                    artistScore = matchedArtistWords.length / artistWords.length;
+                } else if (cleanVidChannel.length > 0) {
+                    artistScore = 0.5;
+                }
+            }
+        } else {
+            artistScore = 1.0; // No artist specified in CSV
+        }
+
+        // Penalty for live/cover/reaction if original track doesn't specify it
+        let penalty = 0;
+        const noiseKeywords = ['cover', 'live', 'reaction', 'karaoke', 'remix', 'instrumental', '10 hours'];
+        noiseKeywords.forEach(kw => {
+            if (cleanVidTitle.includes(kw) && !cleanTrack.includes(kw)) {
+                penalty += 0.15;
+            }
+        });
+
+        let overallScore = 0;
+        if (cleanArtist) {
+            overallScore = Math.round((titleScore * 0.65 + artistScore * 0.35 - penalty) * 100);
+        } else {
+            overallScore = Math.round((titleScore - penalty) * 100);
+        }
+
+        overallScore = Math.max(0, Math.min(100, overallScore));
+
+        let status = 'low';
+        let badgeClass = 'badge-low';
+        let badgeText = `🔴 ${overallScore}% Low Confidence`;
+        let reason = `Track title or artist match is low. Video: "${videoTitle}"`;
+
+        if (overallScore >= 90) {
+            status = 'verified';
+            badgeClass = 'badge-verified';
+            badgeText = `🟢 ${overallScore}% Verified`;
+            reason = 'Exact match: Song title and artist verified in YouTube video.';
+        } else if (overallScore >= 70) {
+            status = 'high';
+            badgeClass = 'badge-high';
+            badgeText = `🟡 ${overallScore}% Good Match`;
+            reason = 'High match confidence: Title matches, artist verified.';
+        } else if (overallScore >= 50) {
+            status = 'moderate';
+            badgeClass = 'badge-moderate';
+            badgeText = `🟠 ${overallScore}% Review Needed`;
+            reason = 'Moderate match: Title matches, check if exact artist/version.';
+        }
+
+        return {
+            score: overallScore,
+            status,
+            badgeClass,
+            badgeText,
+            reason
+        };
+    },
+
+    /**
+     * Search YouTube Videos with Strict Video Match Filtering & Verification Scoring
+     * Strictly EXCLUDES generic YouTube search links (results?search_query=...)
+     */
+    async searchVideos(query, maxResults = 5, trackName = '', artistName = '') {
+        const directVideoId = this.extractVideoId(query);
+        if (directVideoId) {
+            const directVideo = {
+                videoId: directVideoId,
+                title: trackName || query,
+                channelTitle: artistName || 'YouTube',
+                thumbnail: `https://i.ytimg.com/vi/${directVideoId}/hqdefault.jpg`,
+                url: `https://www.youtube.com/watch?v=${directVideoId}`
+            };
+            directVideo.verification = this.verifySongMatch(trackName || query, artistName, directVideo.title, directVideo.channelTitle);
+            directVideo.verification.score = 100;
+            directVideo.verification.status = 'verified';
+            directVideo.verification.badgeClass = 'badge-verified';
+            directVideo.verification.badgeText = '🟢 100% Direct Link Verified';
+            return [directVideo];
+        }
+
+        let candidates = [];
+
+        // 1. Official YouTube Data API (if authenticated with Google OAuth)
         if (this.accessToken) {
             try {
                 const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(query)}&maxResults=${maxResults}`;
@@ -115,7 +253,7 @@ window.YouTubeAPI = {
                 if (res.ok) {
                     const data = await res.json();
                     if (data.items && data.items.length > 0) {
-                        return data.items.map(item => ({
+                        candidates = data.items.map(item => ({
                             videoId: item.id.videoId,
                             title: item.snippet.title,
                             channelTitle: item.snippet.channelTitle,
@@ -125,20 +263,43 @@ window.YouTubeAPI = {
                     }
                 }
             } catch (e) {
-                console.warn('Official OAuth Search error, trying fallback:', e);
+                console.warn('Official OAuth Search failed, trying scrapers:', e);
             }
         }
 
-        // 2. Scrape Real YouTube Video IDs via CORS Proxy
-        try {
-            const scraped = await this.scrapeRealYouTubeVideos(query, maxResults);
-            if (scraped && scraped.length > 0) return scraped;
-        } catch (e) {
-            console.warn('Scraper error:', e);
+        // 2. Scrape Real YouTube Videos via CORS Proxies with JSON Metadata Extraction
+        if (candidates.length === 0) {
+            try {
+                const scraped = await this.scrapeRealYouTubeVideos(query, maxResults);
+                if (scraped && scraped.length > 0) candidates = scraped;
+            } catch (e) {
+                console.warn('Scraper error:', e);
+            }
         }
 
-        // 3. iTunes Track Search Fallback
-        return await this.searchItunesFallback(query);
+        // 3. Fallback to Invidious & Public Video Search APIs
+        if (candidates.length === 0) {
+            try {
+                const invidiousCandidates = await this.searchInvidiousPublicApi(query, maxResults);
+                if (invidiousCandidates && invidiousCandidates.length > 0) candidates = invidiousCandidates;
+            } catch (e) {
+                console.warn('Invidious fallback error:', e);
+            }
+        }
+
+        // Filter OUT any invalid video IDs or search links (no search_query links allowed as video matches!)
+        const validVideos = candidates.filter(v => v.videoId && /^[a-zA-Z0-9_-]{11}$/.test(v.videoId));
+
+        // Compute verification score for each candidate video
+        const targetTrack = trackName || query;
+        validVideos.forEach(v => {
+            v.verification = this.verifySongMatch(targetTrack, artistName, v.title, v.channelTitle);
+        });
+
+        // Sort descending by verification score
+        validVideos.sort((a, b) => b.verification.score - a.verification.score);
+
+        return validVideos;
     },
 
     async scrapeRealYouTubeVideos(query, maxResults = 5) {
@@ -150,65 +311,88 @@ window.YouTubeAPI = {
 
         for (const proxyUrl of corsProxies) {
             try {
-                const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(3500) });
+                const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(4000) });
                 if (!res.ok) continue;
                 const html = await res.text();
 
-                const matches = [];
-                const videoIdRegex = /"videoId":"([a-zA-Z0-9_-]{11})"/g;
-                let match;
-                const seen = new Set();
-
-                while ((match = videoIdRegex.exec(html)) !== null && matches.length < maxResults) {
-                    const vId = match[1];
-                    if (!seen.has(vId)) {
-                        seen.add(vId);
-                        matches.push({
-                            videoId: vId,
-                            title: query,
-                            channelTitle: 'YouTube',
-                            thumbnail: `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`,
-                            url: `https://www.youtube.com/watch?v=${vId}`
-                        });
-                    }
-                }
-
-                if (matches.length > 0) return matches;
+                const parsed = this.parseYouTubeScrapedHtml(html, query, maxResults);
+                if (parsed && parsed.length > 0) return parsed;
             } catch (err) {
                 console.warn(`Proxy ${proxyUrl} failed:`, err);
             }
         }
 
-        return null;
+        return [];
     },
 
-    async searchItunesFallback(query) {
-        try {
-            const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=3`;
-            const res = await fetch(url);
-            if (res.ok) {
-                const data = await res.json();
-                if (data.results && data.results.length > 0) {
-                    return data.results.map(r => ({
-                        videoId: '',
-                        title: `${r.trackName} - ${r.artistName}`,
-                        channelTitle: r.artistName,
-                        thumbnail: r.artworkUrl100 || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100&auto=format&fit=crop&q=60',
-                        url: `https://www.youtube.com/results?search_query=${encodeURIComponent(r.trackName + ' ' + r.artistName)}`
-                    }));
+    parseYouTubeScrapedHtml(html, query, maxResults = 5) {
+        const matches = [];
+        const seen = new Set();
+        const videoIdRegex = /"videoId":"([a-zA-Z0-9_-]{11})"/g;
+        let match;
+
+        while ((match = videoIdRegex.exec(html)) !== null && matches.length < maxResults) {
+            const vId = match[1];
+            if (!seen.has(vId)) {
+                seen.add(vId);
+
+                const index = match.index;
+                const snippet = html.substring(index, index + 1500);
+
+                let title = query;
+                const titleMatch = snippet.match(/"title":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"/);
+                if (titleMatch && titleMatch[1]) {
+                    title = titleMatch[1].replace(/\\u0026/g, '&');
                 }
+
+                let channelTitle = 'YouTube';
+                const channelMatch = snippet.match(/"ownerText":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"/);
+                if (channelMatch && channelMatch[1]) {
+                    channelTitle = channelMatch[1].replace(/\\u0026/g, '&');
+                }
+
+                matches.push({
+                    videoId: vId,
+                    title: title,
+                    channelTitle: channelTitle,
+                    thumbnail: `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`,
+                    url: `https://www.youtube.com/watch?v=${vId}`
+                });
             }
-        } catch (e) {
-            console.warn('iTunes API fallback failed:', e);
         }
 
-        return [{
-            videoId: '',
-            title: `${query} (Search on YouTube)`,
-            channelTitle: 'YouTube',
-            thumbnail: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100&auto=format&fit=crop&q=60',
-            url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`
-        }];
+        return matches;
+    },
+
+    async searchInvidiousPublicApi(query, maxResults = 5) {
+        const instances = [
+            'https://inv.tux.pizza',
+            'https://vid.puffyan.us',
+            'https://invidious.drgns.space'
+        ];
+
+        for (const baseUrl of instances) {
+            try {
+                const url = `${baseUrl}/api/v1/search?q=${encodeURIComponent(query)}&type=video`;
+                const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
+                if (!res.ok) continue;
+                const data = await res.json();
+
+                if (Array.isArray(data) && data.length > 0) {
+                    return data.slice(0, maxResults).map(item => ({
+                        videoId: item.videoId,
+                        title: item.title,
+                        channelTitle: item.author || 'YouTube',
+                        thumbnail: item.videoThumbnails?.find(t => t.quality === 'high')?.url || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
+                        url: `https://www.youtube.com/watch?v=${item.videoId}`
+                    }));
+                }
+            } catch (e) {
+                console.warn(`Invidious instance ${baseUrl} failed:`, e);
+            }
+        }
+
+        return [];
     },
 
     async createPlaylistInAccount(title, privacy = 'unlisted') {
@@ -250,6 +434,10 @@ window.YouTubeAPI = {
             throw new Error('Google OAuth Sign-In required.');
         }
 
+        if (!videoId || videoId.length !== 11) {
+            throw new Error('Invalid YouTube Video ID provided.');
+        }
+
         const url = 'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet';
         const body = {
             snippet: {
@@ -278,3 +466,4 @@ window.YouTubeAPI = {
         return await res.json();
     }
 };
+

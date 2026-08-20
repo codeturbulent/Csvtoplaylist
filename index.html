@@ -140,6 +140,9 @@
                     <input type="text" id="filter-tracks" class="form-control form-control-sm" placeholder="Filter songs...">
                 </div>
 
+                <!-- Verification Accuracy Breakdown -->
+                <div id="verification-stats-summary" class="verification-stats-bar"></div>
+
                 <div id="track-cards-list" class="track-cards-list"></div>
             </div>
         </section>
@@ -152,6 +155,11 @@
             </div>
 
             <div class="card-body">
+                <div class="match-summary-badge" style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: rgba(255,255,255,0.04); border-radius: var(--radius-sm); border: 1px solid var(--border-color); text-align: center;">
+                    <p id="step3-match-summary-text" style="font-size: 0.9rem; color: var(--text-main);">
+                        Find verified direct video matches for your playlist.
+                    </p>
+                </div>
 
                 <!-- Client ID Config Box -->
                 <div class="oauth-config-box">
@@ -214,7 +222,7 @@
                 <div class="export-options-box" style="margin-top: 1.5rem;">
                     <div class="action-buttons-mobile">
                         <button id="btn-copy-urls" class="btn btn-secondary btn-block">
-                            <i class="fa-solid fa-copy"></i> Copy Matched YouTube Links
+                            <i class="fa-solid fa-copy"></i> Copy Verified YouTube Links
                         </button>
                         <button id="btn-export-m3u" class="btn btn-outline btn-block">
                             <i class="fa-solid fa-download"></i> Download M3U Playlist File
@@ -236,10 +244,25 @@
             </div>
             <div class="modal-body">
                 <div class="search-requery-bar">
-                    <input type="text" id="swap-search-input" class="form-control" placeholder="Search custom query...">
+                    <input type="text" id="swap-search-input" class="form-control" placeholder="Search song title or paste YouTube video link...">
                     <button id="btn-execute-swap-search" class="btn btn-primary"><i class="fa-solid fa-magnifying-glass"></i></button>
                 </div>
                 <div id="swap-results-container" class="swap-results-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Preview Modal -->
+    <div id="modal-video-preview" class="modal-overlay hidden">
+        <div class="modal-card modal-preview-card">
+            <div class="modal-header">
+                <h3 id="preview-video-title" class="preview-title"><i class="fa-brands fa-youtube icon-red"></i> Video Preview</h3>
+                <button class="modal-close" id="btn-close-preview-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body preview-body">
+                <div class="video-responsive-wrapper">
+                    <iframe id="preview-iframe" src="" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+                </div>
             </div>
         </div>
     </div>

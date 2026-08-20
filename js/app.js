@@ -159,13 +159,13 @@
         UIManager.renderColumnSelectors(state.headers, detected);
 
         state.tracks = CSVParser.normalizeTracks(state.parsedRows, detected);
-        UIManager.renderTrackCards(state.tracks, openSwapModal);
+        UIManager.renderTrackCards(state.tracks, openSwapModal, (v) => UIManager.openPreviewModal(v));
 
         UIManager.switchStep(2);
     }
 
     /* ==========================================================================
-       2. MAPPING & MATCH SEARCH
+       2. MAPPING & MATCH SEARCH WITH VERIFICATION
        ========================================================================== */
     function bindMappingEvents() {
         const mapTrackSelect = document.getElementById('map-track');
@@ -178,7 +178,7 @@
             state.columnMap.artistCol = mapArtistSelect.value;
 
             state.tracks = CSVParser.normalizeTracks(state.parsedRows, state.columnMap);
-            UIManager.renderTrackCards(state.tracks, openSwapModal);
+            UIManager.renderTrackCards(state.tracks, openSwapModal, (v) => UIManager.openPreviewModal(v));
         };
 
         mapTrackSelect?.addEventListener('change', updateTrackMapping);
@@ -190,7 +190,7 @@
                 t.trackName.toLowerCase().includes(query) ||
                 t.artistName.toLowerCase().includes(query)
             );
-            UIManager.renderTrackCards(filtered, openSwapModal);
+            UIManager.renderTrackCards(filtered, openSwapModal, (v) => UIManager.openPreviewModal(v));
         });
 
         btnStartSearch?.addEventListener('click', async () => {
@@ -202,6 +202,10 @@
 
             UIManager.switchStep(3);
         });
+
+        document.getElementById('btn-back-step-2')?.addEventListener('click', () => {
+            UIManager.switchStep(2);
+        });
     }
 
     async function executeTrackSearchBatch() {
@@ -211,27 +215,40 @@
             const track = state.tracks[i];
             track.status = 'searching';
             
-            UIManager.updateProgress(i + 1, total, `Searching YouTube for "${track.trackName}"...`);
-            UIManager.renderTrackCards(state.tracks, openSwapModal);
+            UIManager.updateProgress(i + 1, total, `Matching "${track.trackName}"...`);
+            UIManager.renderTrackCards(state.tracks, openSwapModal, (v) => UIManager.openPreviewModal(v));
 
             try {
-                const results = await YouTubeAPI.searchVideos(track.searchQuery, 3);
-                if (results && results.length > 0) {
+                const results = await YouTubeAPI.searchVideos(track.searchQuery, 4, track.trackName, track.artistName);
+                if (results && results.length > 0 && results[0].videoId) {
                     track.status = 'matched';
                     track.youtubeMatch = results[0];
                     track.allMatches = results;
                 } else {
-                    track.status = 'error';
+                    track.status = 'no_match';
+                    track.youtubeMatch = null;
+                    track.allMatches = [];
                 }
             } catch (err) {
-                track.status = 'error';
+                track.status = 'no_match';
+                track.youtubeMatch = null;
+                track.allMatches = [];
             }
 
-            UIManager.renderTrackCards(state.tracks, openSwapModal);
-            await new Promise(res => setTimeout(res, 200));
+            UIManager.renderTrackCards(state.tracks, openSwapModal, (v) => UIManager.openPreviewModal(v));
+            await new Promise(res => setTimeout(res, 150));
         }
 
         UIManager.updateProgress(total, total, 'Completed!');
+        updateStep3Summary();
+    }
+
+    function updateStep3Summary() {
+        const matchedTracks = state.tracks.filter(t => t.youtubeMatch && t.youtubeMatch.videoId && t.youtubeMatch.videoId.length === 11);
+        const summaryText = document.getElementById('step3-match-summary-text');
+        if (summaryText) {
+            summaryText.innerHTML = `Found <strong style="color:#00e676;">${matchedTracks.length}</strong> verified video matches out of <strong>${state.tracks.length}</strong> songs.`;
+        }
     }
 
     /* ==========================================================================
@@ -299,9 +316,10 @@
                 return;
             }
 
-            const matchedTracks = state.tracks.filter(t => t.youtubeMatch && t.youtubeMatch.videoId);
+            // Strictly filter only direct valid 11-char YouTube video IDs
+            const matchedTracks = state.tracks.filter(t => t.youtubeMatch && t.youtubeMatch.videoId && t.youtubeMatch.videoId.length === 11);
             if (matchedTracks.length === 0) {
-                alert('No matched YouTube videos available to create playlist.');
+                alert('No valid video matches available. Search or swap videos in Step 2 first.');
                 return;
             }
 
@@ -335,12 +353,12 @@
                         console.warn(`Failed to add song ${track.youtubeMatch.title}:`, e);
                     }
 
-                    await new Promise(res => setTimeout(res, 500));
+                    await new Promise(res => setTimeout(res, 400));
                 }
 
                 progressContainer?.classList.add('hidden');
                 resultSuccessBox?.classList.remove('hidden');
-                if (resultText) resultText.innerText = `Added ${successCount} out of ${total} songs to your YouTube Account!`;
+                if (resultText) resultText.innerText = `Added ${successCount} out of ${total} verified songs directly to your YouTube Account!`;
                 if (openLinkBtn) openLinkBtn.href = playlistUrl;
 
                 window.open(playlistUrl, '_blank');
@@ -354,17 +372,17 @@
     }
 
     /* ==========================================================================
-       5. EXPORT OPTIONS
+       5. EXPORT OPTIONS (STRICT REAL VIDEO URLS ONLY)
        ========================================================================== */
     function bindExportEvents() {
         document.getElementById('btn-export-m3u')?.addEventListener('click', () => {
-            const matchedTracks = state.tracks.filter(t => t.youtubeMatch);
-            if (matchedTracks.length === 0) return alert('No matched videos available.');
+            const matchedTracks = state.tracks.filter(t => t.youtubeMatch && t.youtubeMatch.videoId && t.youtubeMatch.videoId.length === 11);
+            if (matchedTracks.length === 0) return alert('No valid video matches available to export.');
 
             let m3uContent = '#EXTM3U\n';
             matchedTracks.forEach(t => {
                 m3uContent += `#EXTINF:-1,${t.artistName ? t.artistName + ' - ' : ''}${t.trackName}\n`;
-                m3uContent += `${t.youtubeMatch.url}\n`;
+                m3uContent += `https://www.youtube.com/watch?v=${t.youtubeMatch.videoId}\n`;
             });
 
             downloadFile(m3uContent, 'playlist.m3u', 'audio/x-mpegurl');
@@ -372,14 +390,14 @@
 
         document.getElementById('btn-copy-urls')?.addEventListener('click', () => {
             const urls = state.tracks
-                .filter(t => t.youtubeMatch)
-                .map(t => t.youtubeMatch.url)
+                .filter(t => t.youtubeMatch && t.youtubeMatch.videoId && t.youtubeMatch.videoId.length === 11)
+                .map(t => `https://www.youtube.com/watch?v=${t.youtubeMatch.videoId}`)
                 .join('\n');
 
-            if (!urls) return alert('No matched video links available.');
+            if (!urls) return alert('No valid video links available.');
 
             navigator.clipboard.writeText(urls).then(() => {
-                alert('Copied matched YouTube URLs to clipboard!');
+                alert('Copied verified YouTube video links to clipboard!');
             }).catch(err => alert('Failed to copy: ' + err.message));
         });
     }
@@ -397,7 +415,7 @@
     }
 
     /* ==========================================================================
-       6. SWAP MODAL
+       6. SWAP MODAL & MANUAL SEARCH / LINK PASTE
        ========================================================================== */
     function openSwapModal(track) {
         state.activeSwapTrack = track;
@@ -407,40 +425,25 @@
         if (input) input.value = track.searchQuery;
         if (modal) modal.classList.remove('hidden');
 
-        renderSwapResults(track.allMatches || []);
+        renderSwapCandidates(track.allMatches || []);
     }
 
-    function renderSwapResults(items) {
-        const grid = document.getElementById('swap-results-container');
-        if (!grid) return;
-
-        if (!items || items.length === 0) {
-            grid.innerHTML = `<div class="text-center text-muted">No video results found.</div>`;
-            return;
-        }
-
-        grid.innerHTML = '';
-        items.forEach(item => {
-            const card = document.createElement('div');
-            card.className = 'swap-card';
-            card.innerHTML = `
-                <img src="${item.thumbnail}" alt="Thumbnail">
-                <div class="swap-card-info">
-                    <div class="swap-card-title">${UIManager.escapeHtml(item.title)}</div>
-                </div>
-            `;
-
-            card.addEventListener('click', () => {
+    function renderSwapCandidates(items) {
+        UIManager.renderSwapResults(
+            items,
+            (selectedVideo) => {
                 if (state.activeSwapTrack) {
-                    state.activeSwapTrack.youtubeMatch = item;
+                    state.activeSwapTrack.youtubeMatch = selectedVideo;
                     state.activeSwapTrack.status = 'matched';
-                    UIManager.renderTrackCards(state.tracks, openSwapModal);
+                    UIManager.renderTrackCards(state.tracks, openSwapModal, (v) => UIManager.openPreviewModal(v));
+                    updateStep3Summary();
                 }
                 document.getElementById('modal-swap-match')?.classList.add('hidden');
-            });
-
-            grid.appendChild(card);
-        });
+            },
+            (previewVideo) => {
+                UIManager.openPreviewModal(previewVideo);
+            }
+        );
     }
 
     document.getElementById('btn-close-swap-modal')?.addEventListener('click', () => {
@@ -449,13 +452,19 @@
 
     document.getElementById('btn-execute-swap-search')?.addEventListener('click', async () => {
         const query = document.getElementById('swap-search-input')?.value.trim();
-        if (!query) return;
+        if (!query || !state.activeSwapTrack) return;
         
         try {
-            const results = await YouTubeAPI.searchVideos(query, 6);
-            renderSwapResults(results);
+            const results = await YouTubeAPI.searchVideos(
+                query, 
+                6, 
+                state.activeSwapTrack.trackName, 
+                state.activeSwapTrack.artistName
+            );
+            renderSwapCandidates(results);
         } catch (err) {
             alert('Search failed: ' + err.message);
         }
     });
 })();
+
